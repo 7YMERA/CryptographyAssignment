@@ -8,4 +8,5 @@ Download these files and just run it on any compiler of your choice.
 Names for each cipher
 
 StreamCipher = CycloneStream-256
+
 BlockCipher = ShiftBlock
