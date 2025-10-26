@@ -1,0 +1,100 @@
+import os
+import hashlib
+
+
+class CycloneStream256:
+    def __init__(self, key=None):
+        """
+        Initialize stream cipher with 256-bit key
+        If no key provided, generates a random one
+        """
+        if key is None:
+            self.key = os.urandom(32)  # 256-bit key
+        else:
+            if len(key) < 32:
+                # Extend key using SHA-256 to ensure 256-bit length
+                self.key = hashlib.sha256(key).digest()
+            else:
+                self.key = key[:32]
+
+        self.position = 0
+
+    def _keystream_generator(self, data_length, iv=None):
+        """
+        Keystream generator using LFSR-like approach with SHA-256 mixing
+        """
+        if iv is None:
+            iv = os.urandom(16)  # 128-bit IV
+
+        keystream = b''
+        state = hashlib.sha256(self.key + iv).digest()
+
+        for i in range(data_length):
+            # Generate keystream byte
+            keystream_byte = state[i % 32]
+
+            # Update state using non-linear transformation
+            if i % 32 == 31:
+                state = hashlib.sha256(state + bytes([i])).digest()
+
+            keystream += bytes([keystream_byte])
+
+        return keystream, iv
+
+    def encrypt(self, plaintext):
+        """Encrypt plaintext using stream cipher"""
+        if isinstance(plaintext, str):
+            plaintext = plaintext.encode()
+
+        keystream, iv = self._keystream_generator(len(plaintext))
+
+        # XOR plaintext with keystream
+        ciphertext = bytes([p ^ k for p, k in zip(plaintext, keystream)])
+
+        return iv + ciphertext  # Prepend IV for decryption
+
+    def decrypt(self, ciphertext):
+        """Decrypt ciphertext using stream cipher"""
+        # Extract IV (first 16 bytes)
+        iv = ciphertext[:16]
+        actual_ciphertext = ciphertext[16:]
+
+        keystream, _ = self._keystream_generator(len(actual_ciphertext), iv)
+
+        # XOR ciphertext with keystream
+        plaintext = bytes([c ^ k for c, k in zip(actual_ciphertext, keystream)])
+
+        return plaintext
+
+
+# Demo function
+def demo_stream_cipher():
+    print("=== CycloneStream-256 Demo ===")
+
+    # Initialize cipher
+    cipher = CycloneStream256(b"my_secret_key_12345")
+
+    # Sample text
+    sample_text = "Hello, this is a secret message for Computer Security assignment!"
+    print(f"Original text: {sample_text}")
+
+    # Encrypt
+    encrypted = cipher.encrypt(sample_text)
+    print(f"Encrypted (hex): {encrypted.hex()}")
+
+    # Decrypt
+    decrypted = cipher.decrypt(encrypted)
+    print(f"Decrypted: {decrypted.decode()}")
+
+
+    # Verify
+    if decrypted.decode() == sample_text:
+        print("✓ Encryption/Decryption successful!")
+    else:
+        print("✗ Encryption/Decryption failed!")
+
+    return cipher, sample_text, encrypted, decrypted
+
+
+if __name__ == "__main__":
+    demo_stream_cipher()
