@@ -1,96 +1,145 @@
 import os
-import hashlib
 
-class CycloneStream256:
+
+class ShiftBlock:
     def __init__(self, key=None):
-        """
-        Initialize stream cipher with 256-bit key
-        If no key provided, generates a random one
-        """
-        if key is None:
-            self.key = os.urandom(32)  # 256-bit key
-        else:
-            if len(key) < 32:
-                # Extend key using SHA-256 to ensure 256-bit length
-                self.key = hashlib.sha256(key).digest()
-            else:
-                self.key = key[:32]
-        
-        self.position = 0
-        
-    def _keystream_generator(self, data_length, iv=None):
-        """
-        Keystream generator using LFSR-like approach with SHA-256 mixing
-        """
-        if iv is None:
-            iv = os.urandom(16)  # 128-bit IV
-            
-        keystream = b''
-        state = hashlib.sha256(self.key + iv).digest()
-        
-        for i in range(data_length):
-            # Generate keystream byte
-            keystream_byte = state[i % 32]
-            
-            # Update state using non-linear transformation
-            if i % 32 == 31:
-                state = hashlib.sha256(state + bytes([i])).digest()
-                
-            keystream += bytes([keystream_byte])
-            
-        return keystream, iv
-    
+        self.key = key or os.urandom(8)
+        self.block_size = 8
+
+    def _pad(self, data):
+        """Add PKCS7 padding"""
+        padding_length = self.block_size - (len(data) % self.block_size)
+        return data + bytes([padding_length] * padding_length)
+
+    def _unpad(self, data):
+        """Remove padding"""
+        padding_length = data[-1]
+        return data[:-padding_length]
+
+    def _mix_block(self, block):
+        """Custom mixing function: shift and swap bytes"""
+        mixed = bytearray(block)
+
+        # Shift bytes to the left by 1 position
+        mixed = mixed[1:] + mixed[:1]
+
+        # Swap adjacent bytes (0-1, 2-3, 4-5, 6-7)
+        for i in range(0, len(mixed) - 1, 2):
+            mixed[i], mixed[i + 1] = mixed[i + 1], mixed[i]
+
+        return bytes(mixed)
+
+    def _unmix_block(self, block):
+        """Reverse the mixing operation"""
+        unmixed = bytearray(block)
+
+        # Swap adjacent bytes back
+        for i in range(0, len(unmixed) - 1, 2):
+            unmixed[i], unmixed[i + 1] = unmixed[i + 1], unmixed[i]
+
+        # Shift bytes to the right by 1 position
+        unmixed = unmixed[-1:] + unmixed[:-1]
+
+        return bytes(unmixed)
+
     def encrypt(self, plaintext):
-        """Encrypt plaintext using stream cipher"""
+        """Encrypt using custom block operations"""
         if isinstance(plaintext, str):
             plaintext = plaintext.encode()
-            
-        keystream, iv = self._keystream_generator(len(plaintext))
-        
-        # XOR plaintext with keystream
-        ciphertext = bytes([p ^ k for p, k in zip(plaintext, keystream)])
-        
-        return iv + ciphertext  # Prepend IV for decryption
-    
-    def decrypt(self, ciphertext):
-        """Decrypt ciphertext using stream cipher"""
-        # Extract IV (first 16 bytes)
-        iv = ciphertext[:16]
-        actual_ciphertext = ciphertext[16:]
-        
-        keystream, _ = self._keystream_generator(len(actual_ciphertext), iv)
-        
-        # XOR ciphertext with keystream
-        plaintext = bytes([c ^ k for c, k in zip(actual_ciphertext, keystream)])
-        
-        return plaintext
 
-# Demo function
-def demo_stream_cipher():
-    print("=== CycloneStream-256 Demo ===")
-    
-    # Initialize cipher
-    cipher = CycloneStream256(b"my_secret_key_12345")
-    
-    # Sample text
-    sample_text = "Hello, this is a secret message for Computer Security assignment!"
-    print(f"Original text: {sample_text}")
-    
-    # Encrypt
-    encrypted = cipher.encrypt(sample_text)
-    print(f"Encrypted (hex): {encrypted.hex()}")
-    
-    # Decrypt
+        print(f"\n1. Original plaintext: {plaintext}")
+        print(f"   Plaintext (hex): {plaintext.hex()}")
+
+        # Step 1: Padding
+        padded = self._pad(plaintext)
+        print(f"\n2. After PKCS7 padding: {padded}")
+        print(f"   Padded (hex): {padded.hex()}")
+
+        ciphertext = b''
+        block_count = len(padded) // self.block_size
+
+        for i in range(0, len(padded), self.block_size):
+            block = padded[i:i + self.block_size]
+            block_num = i // self.block_size + 1
+
+            print(f"\n--- Processing Block {block_num}/{block_count} ---")
+            print(f"3. Block {block_num}: {block} (hex: {block.hex()})")
+
+            # Step 2: XOR with key
+            xored = bytes([b ^ k for b, k in zip(block, self.key)])
+            print(f"4. After XOR with key: {xored} (hex: {xored.hex()})")
+            print(f"   Key used: {self.key} (hex: {self.key.hex()})")
+
+            # Step 3: Apply custom mixing
+            mixed = self._mix_block(xored)
+            print(f"5. After byte shift & swap: {mixed} (hex: {mixed.hex()})")
+
+            ciphertext += mixed
+
+        print(f"\n6. Final ciphertext: {ciphertext}")
+        print(f"   Ciphertext (hex): {ciphertext.hex()}")
+        return ciphertext
+
+    def decrypt(self, ciphertext):
+        """Decrypt by reversing operations"""
+        print(f"\n--- DECRYPTION PROCESS ---")
+        print(f"1. Ciphertext input: {ciphertext}")
+        print(f"   Ciphertext (hex): {ciphertext.hex()}")
+
+        plaintext = b''
+        block_count = len(ciphertext) // self.block_size
+
+        for i in range(0, len(ciphertext), self.block_size):
+            block = ciphertext[i:i + self.block_size]
+            block_num = i // self.block_size + 1
+
+            print(f"\n--- Processing Block {block_num}/{block_count} ---")
+            print(f"2. Block {block_num}: {block} (hex: {block.hex()})")
+
+            # Step 1: Reverse mixing first
+            unmixed = self._unmix_block(block)
+            print(f"3. After reverse swap & shift: {unmixed} (hex: {unmixed.hex()})")
+
+            # Step 2: XOR with key (same operation for decryption)
+            xored = bytes([b ^ k for b, k in zip(unmixed, self.key)])
+            print(f"4. After XOR with key: {xored} (hex: {xored.hex()})")
+            print(f"   Key used: {self.key} (hex: {self.key.hex()})")
+
+            plaintext += xored
+
+        print(f"\n5. After block processing: {plaintext}")
+        print(f"   (hex: {plaintext.hex()})")
+
+        # Step 3: Remove padding
+        unpadded = self._unpad(plaintext)
+        print(f"6. After removing padding: {unpadded}")
+        print(f"   (hex: {unpadded.hex()})")
+
+        return unpadded
+
+
+def demo_shift_block():
+    print("=== ShiftBlock Cipher Demo ===")
+
+    cipher = ShiftBlock(b"mykey123")
+    message = "Hello World!"
+
+    print(f"Original message: {message}")
+    print(f"Key being used: {cipher.key} (hex: {cipher.key.hex()})")
+
+    encrypted = cipher.encrypt(message)
     decrypted = cipher.decrypt(encrypted)
+
+    print(f"\n=== FINAL RESULTS ===")
+    print(f"Original: {message}")
     print(f"Decrypted: {decrypted.decode()}")
-    
+
     # Verify
-    if decrypted.decode() == sample_text:
-        print("✓ Encryption/Decryption successful!")
-    else:
-        print("✗ Encryption/Decryption failed!")
-    
-    return cipher, sample_text, encrypted, decrypted
+    success = decrypted.decode() == message
+    print(f"✓ Success: {success}")
+
+    return success
+
 
 if __name__ == "__main__":
-    demo_stream_cipher()
+    demo_shift_block()
